@@ -1,1 +1,1 @@
-# MultiSkinDiseases_bulkRNA
+# MultiSkinDiseases Transcriptome
