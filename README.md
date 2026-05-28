@@ -8,39 +8,17 @@ A machine learning pipeline for multi-class disease classification using keratin
 
 This repository implements a Naïve Bayes classifier trained on cytokine-response gene signatures to discriminate between skin diseases. The approach uses gene expression profiles from primary human keratinocytes stimulated with various inflammatory cytokines to build a multi-class disease predictor with unbiased performance assessment via leave-one-out cross-validation.
 
-## Key Features
 
-- **Cytokine-response gene signatures:** Expression profiles from 10 cytokine stimulations
-- **Efficient feature selection:** Top 15 genes per cytokine, ranked by statistical significance
-- **Multi-class classification:** Simultaneous discrimination between 24+ diseases
-- **Rigorous validation:** Leave-one-out cross-validation for unbiased assessment
-- **Robust implementation:** Handles zero-variance genes and numerical stability
-- **ROC curve analysis:** One-vs-rest evaluation for each disease with AUC quantification
-
-## Data & Methods
-
-### Cytokine Stimulation Protocol
-
-Primary human keratinocytes were stimulated for 8 hours with:
-- IL-4
-- IL-13
-- IL-17A
-- IL-17A + TNF-α
-- TNF-α
-- IFN-α
-- IFN-γ
-- IL-36A
-- IL-36B
-- IL-36G
-
-Unstimulated controls were processed in parallel for differential expression analysis.
+## Data & Methods (data needs to processed according to the steps below)
 
 ### Gene Signature Derivation
+e.g. use up-regulated genes from cytokine induced keratinocytes
 
-1. **Differential expression analysis:** Identify cytokine-induced genes vs. unstimulated controls
+1. **Differential expression analysis:** DESeq2 to compute summary statistics
 2. **Selection criteria:** log2 fold-change ≥ 1
 3. **Feature selection:** Top 15 genes per cytokine, ranked by adjusted p-value
 4. **Combined signature:** ~150 genes total across all cytokines
+
 
 ### Naïve Bayes Classifier
 
@@ -71,25 +49,7 @@ Unstimulated controls were processed in parallel for differential expression ana
 - Only diseases with ≥5 samples included in analysis
 - Rationale: Ensures adequate training data and prevents overfitting
 
-## Project Structure
 
-```
-.
-├── README.md                          # This file
-├── Classifier.R                       # MA.classification.loo() function
-├── analysis_example.R                 # Example workflow
-├── figures/
-│   └── roc_curves_skin.pdf           # ROC curves for all diseases
-├── data/
-│   ├── cytokine_signatures/          # Differential expression results per cytokine
-│   ├── sample_metadata.csv           # Sample-disease annotations
-│   └── expression_matrix.Rds         # Normalized expression data
-├── results/
-│   ├── classifier_predictions.csv    # Sample × disease posterior probabilities
-│   ├── disease_rankings.csv          # Ranked predictions per sample
-│   └── performance_metrics.txt       # AUC and accuracy statistics
-└── LICENSE
-```
 
 ## Usage
 
