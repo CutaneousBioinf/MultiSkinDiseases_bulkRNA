@@ -81,66 +81,209 @@ res.naivebayes <- MA.classification.loo(
   - Columns: Disease names
   - Values: Posterior probability (0–1) of each sample belonging to each disease
 
-### Example Workflow
+
+### Data Structure
+
+Your data should be organized as follows:
+
+**`site.anno`** - List of phenotype annotations (one element per tissue type)
+```r
+site.anno[[tissue_name]]  # e.g., site.anno[["skin"]]
+# Should be a data frame with columns:
+# - Sample_ID (or equivalent)
+# - Disease (disease/phenotype labels)
+# - Any other clinical/metadata columns
+```
+
+**`site.DGEList_scale_voom_invnorm`** - List of expression matrices (one per tissue type)
+```r
+site.DGEList_scale_voom_invnorm[[tissue_name]]  # e.g., site.DGEList_scale_voom_invnorm[["skin"]]
+# Should be a numeric matrix with:
+# - Rows: Gene names
+# - Columns: Sample names (matching site.anno[[tissue_name]])
+# - Values: Log-normalized expression (voom-transformed, inverse normal transformed)
+```
+
+**`cytokineinduced`** - List of differential expression results (one per cytokine)
+```r
+cytokineinduced[["IL-4"]]   # Example for one cytokine
+cytokineinduced[["IL-13"]]
+cytokineinduced[["IL-17A"]]
+# ... and so on for all 10 cytokines
+# Each element should be a matrix or data frame with columns:
+# - baseMean (or equivalent expression level)
+# - lfcMLE (log2 fold-change)
+# - pvalue (p-value)
+# - padj (adjusted p-value)
+# - Rownames: Gene names
+```
+
+### Complete Example Workflow
 
 ```r
+# ========================================================================
 # Load required libraries
+# ========================================================================
 library(tidyverse)
 library(pROC)
 
+# ========================================================================
 # Source the classifier function
+# ========================================================================
 source("Classifier.R")
 
-# Filter for diseases with ≥5 samples
-s <- "skin"
-tempp <- table(site.anno[[s]]$Disease)
-tempdiseases <- names(tempp)[tempp >= 5]
+# ========================================================================
+# Define data objects (you must load/create these before proceeding)
+# ========================================================================
+# site.anno: List of phenotype annotations per tissue
+#   structure: site.anno[["tissue_name"]]$Disease contains disease labels
+# site.DGEList_scale_voom_invnorm: List of expression matrices per tissue
+#   structure: site.DGEList_scale_voom_invnorm[["tissue_name"]] is genes × samples matrix
+# cytokineinduced: List of differential expression results per cytokine
+#   structure: cytokineinduced[[cytokine_name]] with columns: baseMean, lfcMLE, pvalue, padj
+#   rownames: Gene names
 
-# Extract filtered expression and phenotype data
-temp.data <- site.DGEList_scale_voom_invnorm[[s]][,
-  site.anno[[s]]$Disease %in% tempdiseases]
+# Example of data loading (modify paths/objects to match your setup):
+# load("path/to/site.anno.RData")
+# load("path/to/site.DGEList_scale_voom_invnorm.RData")
+# load("path/to/cytokineinduced.RData")
+
+# ========================================================================
+# Step 1: Select tissue type
+# ========================================================================
+tissue <- "skin"  # Change to "oral", "joint", etc. as needed
+
+# ========================================================================
+# Step 2: Filter for diseases with ≥5 samples
+# ========================================================================
+disease_counts <- table(site.anno[[tissue]]$Disease)
+diseases_filtered <- names(disease_counts)[disease_counts >= 5]
+
+cat("Number of diseases with ≥5 samples:", length(diseases_filtered), "\n")
+cat("Diseases included:", paste(diseases_filtered, collapse = ", "), "\n")
+
+# ========================================================================
+# Step 3: Extract filtered expression and phenotype data
+# ========================================================================
+# Get column indices matching filtered diseases
+sample_indices <- site.anno[[tissue]]$Disease %in% diseases_filtered
+
+# Extract expression matrix and phenotype for filtered samples
+temp.data <- site.DGEList_scale_voom_invnorm[[tissue]][, sample_indices]
 temp.pheno <- cbind(
   colnames(temp.data),
-  as.character(site.anno[[s]]$Disease[site.anno[[s]]$Disease %in% tempdiseases])
+  as.character(site.anno[[tissue]]$Disease[sample_indices])
 )
+colnames(temp.pheno) <- c("Sample_ID", "Disease")
 
-# Select signature genes: top 15 per cytokine
-tempcyt <- lapply(names(cytokineinduced), function(x) {
-  data.frame(cytokineinduced[[x]]) %>%
-    mutate(cytokine = x, gene = rownames(cytokineinduced[[x]]))
+cat("Expression matrix dimensions:", nrow(temp.data), "genes ×", 
+    ncol(temp.data), "samples\n")
+
+# ========================================================================
+# Step 4: Select signature genes - top 15 per cytokine
+# ========================================================================
+# Reorganize cytokine DEG results into a single tibble
+tempcyt <- lapply(names(cytokineinduced), function(cytokine_name) {
+  deg_matrix <- cytokineinduced[[cytokine_name]]
+  data.frame(deg_matrix) %>%
+    mutate(
+      cytokine = cytokine_name,
+      gene = rownames(deg_matrix)
+    )
 })
 
+# Filter and select genes
 temp.cyt.upgenes <- tibble(as.data.frame(do.call(rbind, tempcyt))) %>%
-  filter(lfcMLE >= 1) %>%
-  arrange(pvalue) %>%
+  filter(lfcMLE >= 1) %>%           # log2 fold-change ≥ 1
+  arrange(pvalue) %>%               # rank by p-value (most significant first)
   group_by(cytokine) %>%
-  slice(1:15)
+  slice(1:15)                        # top 15 per cytokine
 
-# Run leave-one-out cross-validation classification
+# Get unique gene names that are present in expression matrix
+signature_genes <- intersect(
+  rownames(temp.data),
+  unique(temp.cyt.upgenes$gene)
+)
+
+cat("Number of signature genes:", length(signature_genes), "\n")
+cat("Genes per cytokine (target: 15):\n")
+print(table(temp.cyt.upgenes$cytokine))
+
+# ========================================================================
+# Step 5: Run leave-one-out cross-validation classification
+# ========================================================================
 res.naivebayes <- MA.classification.loo(
   temp.pheno,
   temp.data,
-  intersect(rownames(temp.data), unique(temp.cyt.upgenes$gene))
+  signature_genes
 )
 
-# Calculate disease rankings for each sample
+cat("Classification complete. Results dimensions:", 
+    nrow(res.naivebayes), "samples ×", 
+    ncol(res.naivebayes), "diseases\n")
+
+# ========================================================================
+# Step 6: Calculate disease rankings for each sample
+# ========================================================================
+# For each sample, rank diseases by posterior probability (1 = highest)
 res.naivebayes.rank <- t(apply(res.naivebayes, 1, function(x) rank(-x)))
 
-# Determine rank of true disease for each sample
-res.naivebayes.rank.truepheno <- character(dim(temp.pheno)[1])
-for (i in 1:dim(temp.pheno)[1]) {
-  res.naivebayes.rank.truepheno[i] <- res.naivebayes.rank[i, temp.pheno[i, 2]]
+# Get the rank of the true disease for each sample
+res.naivebayes.rank.truepheno <- character(nrow(temp.pheno))
+for (i in 1:nrow(temp.pheno)) {
+  true_disease <- temp.pheno[i, 2]
+  res.naivebayes.rank.truepheno[i] <- res.naivebayes.rank[i, true_disease]
 }
 
-# Generate ROC curves for each disease
+# Summary statistics
+cat("\nClassification performance summary:\n")
+cat("Samples with true disease ranked #1:",
+    sum(res.naivebayes.rank.truepheno == 1), "/", nrow(temp.pheno), "\n")
+cat("Mean rank of true disease:",
+    round(mean(as.numeric(res.naivebayes.rank.truepheno)), 2), "\n")
+
+# ========================================================================
+# Step 7: Generate ROC curves for each disease
+# ========================================================================
 pdf("roc_curves_skin.pdf", width = 11, height = 11)
 par(mfrow = c(5, 5))
-for (d in colnames(res.naivebayes)) {
-  true_labels <- as.numeric(temp.pheno[, 2] == d)
-  plot.roc(true_labels, res.naivebayes[, d],
-    percent = TRUE, main = d, print.auc = TRUE)
+
+for (disease in colnames(res.naivebayes)) {
+  # Create binary labels: 1 = this disease, 0 = all other diseases
+  true_labels <- as.numeric(temp.pheno[, 2] == disease)
+  
+  # Get predicted probabilities for this disease
+  predictions <- res.naivebayes[, disease]
+  
+  # Plot ROC curve
+  roc_obj <- plot.roc(true_labels, predictions,
+    percent = TRUE,
+    main = disease,
+    print.auc = TRUE
+  )
 }
 dev.off()
+
+cat("ROC curves saved to: roc_curves_skin.pdf\n")
+
+# ========================================================================
+# Step 8: Save results
+# ========================================================================
+# Save posterior probabilities
+write.csv(res.naivebayes, "classifier_predictions.csv")
+
+# Save disease rankings
+write.csv(res.naivebayes.rank, "disease_rankings.csv")
+
+# Save true disease ranks
+results_summary <- data.frame(
+  Sample = rownames(res.naivebayes),
+  True_Disease = temp.pheno[, 2],
+  True_Disease_Rank = as.numeric(res.naivebayes.rank.truepheno)
+)
+write.csv(results_summary, "classification_summary.csv", row.names = FALSE)
+
+cat("Results saved successfully!\n")
 ```
 
 ### Output Interpretation
