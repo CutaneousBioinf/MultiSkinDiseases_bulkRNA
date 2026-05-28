@@ -357,15 +357,3 @@ if (!require("BiocManager", quietly = TRUE))
 BiocManager::install("limma")
 ```
 
-## Citation
-
-If you use this classifier or methodology in your research, please cite:
-
-[Your manuscript title]  
-[Authors]  
-[Journal] (Year)  
-DOI: [your DOI]
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for details.
