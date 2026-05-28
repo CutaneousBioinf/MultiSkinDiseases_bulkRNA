@@ -357,3 +357,6 @@ if (!require("BiocManager", quietly = TRUE))
 BiocManager::install("limma")
 ```
 
+
+### Disclaimer
+While we conducted vigorous normalization, leave one out cross validation, on the data preparation and processing, etc, we acknowledge there can be bias caused by confounding factors including batch effect, biopsy sampling, and the nature of bulk RNA-seq. 
